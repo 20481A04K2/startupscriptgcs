@@ -10,29 +10,22 @@ steps:
         echo "VERSION_TAG=$$VERSION_TAG" > /workspace/version.env
         echo "Generated version: $$VERSION_TAG"
 
-  # Step 1: Dynamically create startup.sh (inline using gcloud image)
-  - name: 'gcr.io/cloud-builders/gcloud'
+  # Step 1: Dynamically create startup.sh (inline Ubuntu)
+  - name: 'ubuntu'
     id: 'Create startup.sh'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         source /workspace/version.env
-        FILENAME="/workspace/startup-$$VERSION_TAG.sh"
-
-        cat <<EOF > $$FILENAME
-        #!/bin/bash
-        echo "Dynamic startup script for $$VERSION_TAG started..."
-
-        apt-get update -y
-        apt-get install -y apache2
-
-        systemctl start apache2
-        systemctl enable apache2
-
-        echo "<h1>Hello Apache2 running from version $$VERSION_TAG</h1>" > /var/www/html/index.html
-        EOF
-
+        FILENAME=/workspace/startup-$$VERSION_TAG.sh
+        echo "#!/bin/bash" > $$FILENAME
+        echo "echo \"Dynamic startup script for $$VERSION_TAG started...\"" >> $$FILENAME
+        echo "apt-get update -y" >> $$FILENAME
+        echo "apt-get install -y apache2" >> $$FILENAME
+        echo "systemctl start apache2" >> $$FILENAME
+        echo "systemctl enable apache2" >> $$FILENAME
+        echo "echo \"<h1>Hello Apache2 running from version $$VERSION_TAG</h1>\" > /var/www/html/index.html" >> $$FILENAME
         chmod +x $$FILENAME
 
   # Step 2: Upload startup.sh to GCS with version tag in filename
@@ -45,7 +38,7 @@ steps:
         source /workspace/version.env
         gsutil cp /workspace/startup-$$VERSION_TAG.sh gs://vamsi-artifact-bucket/scripts/startup-$$VERSION_TAG.sh
 
-  # Step 3: Create Instance Template with startup-script-url
+  # Step 3: Create Instance Template with startup-script-url (Debian image)
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Create Instance Template'
     entrypoint: 'bash'
@@ -64,13 +57,14 @@ steps:
           --tags=http-server,https-server,allow-8080 \
           --metadata=startup-script-url=$$STARTUP_SCRIPT_URL
 
-  # Step 4: Create or Update MIG
+  # Step 4: Create or Update MIG with proper if-fi block
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Create or Update MIG'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        set -x
         source /workspace/version.env
         MIG_NAME="vamsi-mig"
         TEMPLATE_NAME="vamsi-template-$$VERSION_TAG"
@@ -93,6 +87,7 @@ steps:
           echo "Triggering rolling restart..."
           gcloud compute instance-groups managed rolling-action restart $$MIG_NAME \
             --zone=$$ZONE
+        fi
 
 options:
   logging: CLOUD_LOGGING_ONLY
