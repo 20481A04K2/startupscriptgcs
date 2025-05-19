@@ -33,13 +33,17 @@ steps:
 
         chmod +x /workspace/startup-$$VERSION_TAG.sh
 
-  # Step 2: Upload startup.sh to GCS
+  # Step 2: Upload startup.sh to GCS with version tag in filename
   - name: 'gcr.io/cloud-builders/gsutil'
     id: 'Upload startup.sh to GCS'
+    entrypoint: 'bash'
     args:
-      - cp
-      - /workspace/startup-$(cat /workspace/version.env | cut -d '=' -f 2).sh
-      - gs://vamsi-artifact-bucket/scripts/
+      - '-c'
+      - |
+        source /workspace/version.env
+        echo "Uploading startup-$$VERSION_TAG.sh to GCS..."
+        gsutil cp /workspace/startup-$$VERSION_TAG.sh gs://vamsi-artifact-bucket/scripts/startup-$$VERSION_TAG.sh
+
 
   # Step 3: Create Instance Template with startup-script-url
   - name: 'gcr.io/cloud-builders/gcloud'
