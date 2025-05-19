@@ -60,21 +60,34 @@ steps:
           --tags=http-server,https-server,allow-8080 \
           --metadata=startup-script-url=$$STARTUP_SCRIPT_URL
 
-  # Step 4: Update MIG with new instance template
+  # Step 4: Create or Update MIG (Zonal, versioned template)
   - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'Update MIG Only'
+    id: 'Create or Update MIG'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         source /workspace/version.env
-        echo "Updating MIG with new template..."
-        gcloud compute instance-groups managed set-instance-template vamsi-mig \
-          --template=vamsi-template-$$VERSION_TAG \
-          --zone=asia-east1-b
 
-        gcloud compute instance-groups managed rolling-action restart vamsi-mig \
-          --zone=asia-east1-b
+        echo "Checking if MIG exists..."
+        if ! gcloud compute instance-groups managed describe vamsi-mig --zone=asia-east1-b > /dev/null 2>&1; then
+          echo "MIG does not exist. Creating with template: vamsi-template-$$VERSION_TAG"
+          gcloud compute instance-groups managed create vamsi-mig \
+            --base-instance-name=vamsi-instance \
+            --template=vamsi-template-$$VERSION_TAG \
+            --size=1 \
+            --zone=asia-east1-b
+        else
+          echo "MIG exists. Updating with new template: vamsi-template-$$VERSION_TAG"
+          gcloud compute instance-groups managed set-instance-template vamsi-mig \
+            --template=vamsi-template-$$VERSION_TAG \
+            --zone=asia-east1-b
+
+          echo "Triggering rolling restart..."
+          gcloud compute instance-groups managed rolling-action restart vamsi-mig \
+            --zone=asia-east1-b
+        fi
+
 
 options:
   logging: CLOUD_LOGGING_ONLY
