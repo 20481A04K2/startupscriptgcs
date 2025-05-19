@@ -1,5 +1,5 @@
 steps:
- # Step 0: Generate dynamic version tag
+  # Step 0: Generate dynamic version tag
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Generate Version'
     entrypoint: 'bash'
@@ -10,35 +10,38 @@ steps:
         echo "VERSION_TAG=$$VERSION_TAG" > /workspace/version.env
         echo "Generated version: $$VERSION_TAG"
 
-  # Step 1: Download ZIP file from GitHub
-  - name: 'gcr.io/cloud-builders/curl'
-    id: 'Download ZIP from GitHub'
-    entrypoint: '/bin/sh'
-    args:
-      - '-c'
-      - |
-        curl -L https://github.com/20481A04K2/gcsgithub/archive/refs/heads/main.zip -o source.zip
-
-  # Step 2: Show ZIP file size
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'Show ZIP File Size'
-    entrypoint: '/bin/sh'
-    args:
-      - '-c'
-      - |
-        du -sh source.zip
-
-  # Step 3: Upload ZIP to GCS Bucket
-  - name: 'gcr.io/cloud-builders/gcloud'
-    id: 'Upload to GCS'
+  # Step 1: Dynamically create startup.sh
+  - name: 'ubuntu'
+    id: 'Create startup.sh'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         source /workspace/version.env
-        gsutil cp source.zip gs://vamsi-artifact-bucket/$$VERSION_TAG/source.zip
+        cat <<EOF > /workspace/startup-$$VERSION_TAG.sh
+        #!/bin/bash
+        echo "Dynamic startup script for $$VERSION_TAG started..."
 
-  # Step 4: Create Instance Template
+        apt-get update -y
+        apt-get install -y apache2
+
+        systemctl start apache2
+        systemctl enable apache2
+
+        echo "<h1>Apache2 running from version $$VERSION_TAG</h1>" > /var/www/html/index.html
+        EOF
+
+        chmod +x /workspace/startup-$$VERSION_TAG.sh
+
+  # Step 2: Upload startup.sh to GCS
+  - name: 'gcr.io/cloud-builders/gsutil'
+    id: 'Upload startup.sh to GCS'
+    args:
+      - cp
+      - /workspace/startup-$(cat /workspace/version.env | cut -d '=' -f 2).sh
+      - gs://vamsi-artifact-bucket/scripts/
+
+  # Step 3: Create Instance Template with startup-script-url
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Create Instance Template'
     entrypoint: 'bash'
@@ -47,6 +50,7 @@ steps:
       - |
         source /workspace/version.env
         VERSION=$$VERSION_TAG
+        STARTUP_SCRIPT_URL=gs://vamsi-artifact-bucket/scripts/startup-$$VERSION.sh
 
         gcloud compute instance-templates create vamsi-template-$$VERSION \
           --machine-type=e2-medium \
@@ -54,38 +58,9 @@ steps:
           --image-family=debian-12 \
           --image-project=debian-cloud \
           --tags=http-server,https-server,allow-8080 \
-          --metadata=startup-script="#!/bin/bash
-          echo 'Startup script started.'
-          VERSION_TAG=$$VERSION
-          echo 'Using version tag: '$$VERSION_TAG
+          --metadata=startup-script-url=$$STARTUP_SCRIPT_URL
 
-          apt-get update -y
-          apt-get install -y unzip curl python3-pip python3.11-venv
-
-          mkdir -p /home/sajja_vamsi/my-app
-          cd /home/sajja_vamsi/my-app
-          chown -R sajja_vamsi:sajja_vamsi /home/sajja_vamsi/my-app
-
-          echo 'Downloading ZIP from GCS...'
-          gsutil cp gs://vamsi-artifact-bucket/$$VERSION_TAG/source.zip source.zip
-
-          echo 'Unzipping...'
-          unzip -o source.zip -d .
-
-          echo 'Setting up Python virtual environment...'
-          python3 -m venv venv
-          source venv/bin/activate
-
-          echo 'Installing Flask...'
-          pip install flask
-
-          echo 'Starting Flask app...'
-          cd gcsgithub-main
-          nohup ../venv/bin/python app.py --host=0.0.0.0 --port=8080 > /home/sajja_vamsi/my-app/app.log 2>&1 &"
-
-
-
-  # Step 5: Update MIG with new template (no creation logic)
+  # Step 4: Update MIG with new instance template
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Update MIG Only'
     entrypoint: 'bash'
@@ -97,11 +72,9 @@ steps:
         gcloud compute instance-groups managed set-instance-template vamsi-mig \
           --template=vamsi-template-$$VERSION_TAG \
           --zone=asia-east1-b
+
         gcloud compute instance-groups managed rolling-action restart vamsi-mig \
           --zone=asia-east1-b
-
-
- 
 
 options:
   logging: CLOUD_LOGGING_ONLY
