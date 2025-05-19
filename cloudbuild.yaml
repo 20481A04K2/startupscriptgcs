@@ -38,7 +38,7 @@ steps:
         source /workspace/version.env
         gsutil cp /workspace/startup-$$VERSION_TAG.sh gs://vamsi-artifact-bucket/scripts/startup-$$VERSION_TAG.sh
 
-  # Step 3: Create Instance Template with startup-script-url (Debian image)
+  # Step 3: Create Instance Template with startup-script-url (Ubuntu image)
   - name: 'gcr.io/cloud-builders/gcloud'
     id: 'Create Instance Template'
     entrypoint: 'bash'
@@ -52,8 +52,8 @@ steps:
         gcloud compute instance-templates create vamsi-template-$$VERSION \
           --machine-type=e2-medium \
           --region=asia-east1 \
-          --image-family=debian-12 \
-          --image-project=debian-cloud \
+          --image-family=ubuntu-2204-lts \
+          --image-project=ubuntu-os-cloud \
           --tags=http-server,https-server,allow-8080 \
           --metadata=startup-script-url=$$STARTUP_SCRIPT_URL
 
